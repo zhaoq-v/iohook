@@ -16,6 +16,9 @@ jobs:
         include:
           - os: windows-latest
             arch: i686
+        include:
+          - os: macos-latest
+            arch: arm64
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.os }} (${{matrix.arch}})
     steps:
