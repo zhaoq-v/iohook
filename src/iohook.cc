@@ -445,7 +445,10 @@ v8::Local<v8::Object> fillEventObject(uiohook_event event) {
     }
 
     if (event.type == EVENT_KEY_TYPED) {
+      char* character = (char*) &event.data.keyboard.keychar;
+
       keyboard->Set(v8::Isolate::GetCurrent()->GetCurrentContext(), Nan::New("keychar").ToLocalChecked(), Nan::New((uint16_t)event.data.keyboard.keychar));
+      keyboard->Set(v8::Isolate::GetCurrent()->GetCurrentContext(), Nan::New("key").ToLocalChecked(), Nan::New(character).ToLocalChecked());
     }
 
     keyboard->Set(v8::Isolate::GetCurrent()->GetCurrentContext(), Nan::New("keycode").ToLocalChecked(), Nan::New((uint16_t)event.data.keyboard.keycode));
