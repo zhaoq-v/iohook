@@ -30,6 +30,10 @@ jobs:
           # Set registry to NPM instead of github packages for publication
           registry-url: 'https://registry.npmjs.org'
           node-version: 14
+      - name: Setup macos Dependencies
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          pip install --upgrade setuptools
 
       - name: Setup Linux Dependencies
         if: startsWith(matrix.os, 'ubuntu')
