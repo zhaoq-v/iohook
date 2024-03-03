@@ -109,5 +109,8 @@
       "29.0.0-alpha.1",
       "121"
     ]
-  ]
+  ],
+  "resolutions": {
+    "nan": "github:tec27/nan#remove_accessor_signature"
+  }
 }
