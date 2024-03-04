@@ -164,8 +164,8 @@ function build(runtime, version, abi) {
     console.log('Building iohook for ' + runtime + ' v' + version + '>>>>');
     if (process.platform === 'win32') {
       if (version.split('.')[0] >= 4) {
-        process.env.msvs_toolset = argv.msvs_toolset || 17;
-        process.env.msvs_version = argv.msvs_version || 2022;
+        process.env.msvs_toolset = 15;
+        process.env.msvs_version = argv.msvs_version || 2017;
       } else {
         process.env.msvs_toolset = 12;
         process.env.msvs_version = 2013;
