@@ -10,6 +10,8 @@
 
 ## ⑂ What the fork is this?
 
+🚨 Doesn't work on (at least) Apple silicon so far.
+
 This fork of [SpaceK33z/iohook](https://github.com/SpaceK33z/iohook) and [wilix-team/iohook](https://github.com/wilix-team/iohook) supports Electron 26-29 and Node 18-21.
 
 ## About
