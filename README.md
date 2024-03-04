@@ -8,7 +8,7 @@
 [![Gitter chat](https://badges.gitter.im/gitterHQ/gitter.png)](https://gitter.im/iohookjs/Lobby)
 [![Issues](https://img.shields.io/github/issues-raw/mhgbrown/iohook)](https://github.com/mhgbrown/iohook/issues)
 
-## 🍴 What the fork is this?
+## ⑂ What the fork is this?
 
 This fork of [SpaceK33z/iohook](https://github.com/SpaceK33z/iohook) and [wilix-team/iohook](https://github.com/wilix-team/iohook) supports Electron 26-29 and Node 18-21.
 

@@ -1,16 +1,16 @@
 {
-  "name": "@spacek33z/iohook",
+  "name": "@mhgbrown/iohook",
   "version": "0.12.0",
   "description": "Node.js global keyboard and mouse hook",
   "author": "Aloyan Dmitry",
   "license": "MIT",
-  "homepage": "https://github.com/SpaceK33z/iohook",
+  "homepage": "https://github.com/mhgbrown/iohook",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SpaceK33z/iohook.git"
+    "url": "git+https://github.com/mhgbrown/iohook.git"
   },
   "bugs": {
-    "url": "https://github.com/SpaceK33z/iohook/issues"
+    "url": "https://github.com/mhgbrown/iohook/issues"
   },
   "main": "index.js",
   "types": "index.d.ts",
