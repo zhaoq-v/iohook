@@ -1,5 +1,5 @@
 /* libUIOHook: Cross-platform keyboard and mouse hooking from userland.
- * Copyright (C) 2006-2023 Alexander Barker.  All Rights Reserved.
+ * Copyright (C) 2006-2022 Alexander Barker.  All Rights Reserved.
  * https://github.com/kwhat/libuiohook/
  *
  * libUIOHook is free software: you can redistribute it and/or modify
@@ -16,16 +16,22 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _included_logger
-#define _included_logger
+#include <X11/Xlib.h>
 
+// FIXME Shouldn't be extern, remove
 #include <uiohook.h>
-#include <stdbool.h>
+extern void dispatch_event(uiohook_event *const uio_event);
 
-#ifndef __FUNCTION__
-#define __FUNCTION__ __func__
-#endif
+extern void dispatch_hook_enabled();
 
-extern void logger(unsigned int level, const char *format, ...);
+extern void dispatch_hook_disabled();
 
-#endif
+extern void dispatch_key_press(XKeyPressedEvent * const x_event);
+
+extern void dispatch_key_release(XKeyReleasedEvent * const x_event);
+
+extern void dispatch_mouse_press(XButtonEvent * const x_event);
+
+extern void dispatch_mouse_release(XButtonEvent * const x_event);
+
+extern void dispatch_mouse_move(XMotionEvent * const x_event);

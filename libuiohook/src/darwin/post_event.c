@@ -29,6 +29,14 @@ static CGEventFlags current_modifier_mask = 0x00;
 static CGEventType current_motion_event = kCGEventMouseMoved;
 static CGMouseButton current_motion_button = 0;
 
+UIOHOOK_API uint64_t hook_get_post_text_delay_x11() {
+    // Not applicable on maOS, so does nothing
+    return 0;
+}
+
+UIOHOOK_API void hook_set_post_text_delay_x11(uint64_t delay) {
+    // Not applicable on maOS, so does nothing
+}
 
 static int post_key_event(uiohook_event * const event, CGEventSourceRef src) {
     bool is_pressed;
@@ -81,7 +89,7 @@ static int post_key_event(uiohook_event * const event, CGEventSourceRef src) {
         }
     } else {
         logger(LOG_LEVEL_DEBUG, "%s [%u]: Invalid event for keyboard post event: %#X.\n",
-            __FUNCTION__, __LINE__, event->type);
+                __FUNCTION__, __LINE__, event->type);
         return UIOHOOK_FAILURE;
     }
 
@@ -105,12 +113,11 @@ static int post_key_event(uiohook_event * const event, CGEventSourceRef src) {
         case VC_KP_SEPARATOR:
         case VC_KP_SUBTRACT:
         case VC_KP_DIVIDE:
-        case VC_KP_COMMA:
             event_mask |= kCGEventFlagMaskNumericPad;
             break;
     }
 
-    CGKeyCode keycode = (CGKeyCode) scancode_to_keycode(event->data.keyboard.keycode);
+    CGKeyCode keycode = (CGKeyCode) vcode_to_keycode(event->data.keyboard.keycode);
     if (keycode == kVK_Undefined) {
         logger(LOG_LEVEL_WARN, "%s [%u]: Unable to lookup scancode: %li\n",
                 __FUNCTION__, __LINE__, event->data.keyboard.keycode);
@@ -126,7 +133,6 @@ static int post_key_event(uiohook_event * const event, CGEventSourceRef src) {
     if (cg_event == NULL) {
         logger(LOG_LEVEL_ERROR, "%s [%u]: CGEventCreateKeyboardEvent failed!\n",
                 __FUNCTION__, __LINE__);
-
         return UIOHOOK_ERROR_OUT_OF_MEMORY;
     }
 
@@ -144,6 +150,7 @@ static int post_mouse_event(uiohook_event * const event, CGEventSourceRef src) {
 
     switch (event->type) {
         case EVENT_MOUSE_PRESSED:
+        case EVENT_MOUSE_PRESSED_IGNORE_COORDS:
             if (event->data.mouse.button == MOUSE_NOBUTTON) {
                 // FIXME Warning
                 return UIOHOOK_FAILURE;
@@ -164,6 +171,7 @@ static int post_mouse_event(uiohook_event * const event, CGEventSourceRef src) {
             break;
 
         case EVENT_MOUSE_RELEASED:
+        case EVENT_MOUSE_RELEASED_IGNORE_COORDS:
             if (event->data.mouse.button == MOUSE_NOBUTTON) {
                 // FIXME Warning
                 return UIOHOOK_FAILURE;
@@ -191,30 +199,51 @@ static int post_mouse_event(uiohook_event * const event, CGEventSourceRef src) {
 
         case EVENT_MOUSE_MOVED:
         case EVENT_MOUSE_DRAGGED:
+        case EVENT_MOUSE_MOVED_RELATIVE_TO_CURSOR:
             type = current_motion_event;
             button = current_motion_button;
             break;
 
         default:
             logger(LOG_LEVEL_DEBUG, "%s [%u]: Invalid mouse event: %#X.\n",
-                __FUNCTION__, __LINE__, event->type);
+                    __FUNCTION__, __LINE__, event->type);
             return UIOHOOK_FAILURE;
     }
 
+    CGPoint point;
+
+    if (event->type == EVENT_MOUSE_PRESSED_IGNORE_COORDS || event->type == EVENT_MOUSE_RELEASED_IGNORE_COORDS) {
+        CGEventRef null_event = CGEventCreate(NULL);
+        point = CGEventGetLocation(null_event);
+        CFRelease(null_event);
+    } else if (event->type == EVENT_MOUSE_MOVED_RELATIVE_TO_CURSOR) {
+        CGEventRef null_event = CGEventCreate(NULL);
+        point = CGEventGetLocation(null_event);
+        CFRelease(null_event);
+        point.x += (CGFloat) event->data.mouse.x;
+        point.y += (CGFloat) event->data.mouse.y;
+    } else {
+        point = CGPointMake(
+                (CGFloat) event->data.mouse.x,
+                (CGFloat) event->data.mouse.y
+        );
+    }
+
     CGEventRef cg_event = CGEventCreateMouseEvent(
-        src,
-        type,
-        CGPointMake(
-            (CGFloat) event->data.mouse.x,
-            (CGFloat) event->data.mouse.y
-        ),
-        button
+            src,
+            type,
+            point,
+            button
     );
 
     if (cg_event == NULL) {
         logger(LOG_LEVEL_ERROR, "%s [%u]: CGEventCreateMouseEvent failed!\n",
                 __FUNCTION__, __LINE__);
         return UIOHOOK_ERROR_OUT_OF_MEMORY;
+    }
+
+    if (event->data.mouse.clicks != 0) {
+        CGEventSetIntegerValueField(cg_event, kCGMouseEventClickState, event->data.mouse.clicks);
     }
 
     CGEventPost(kCGHIDEventTap, cg_event); // kCGSessionEventTap also works.
@@ -224,10 +253,6 @@ static int post_mouse_event(uiohook_event * const event, CGEventSourceRef src) {
 }
 
 static int post_mouse_wheel_event(uiohook_event * const event, CGEventSourceRef src) {
-    // FIXME Should I create a source event with the coords?
-    // It seems to automagically use the current location of the cursor.
-    // Two options: Query the mouse, move it to x/y, scroll, then move back
-    // OR disable x/y for scroll events on Windows & X11.
     CGScrollEventUnit scroll_unit;
     if (event->data.wheel.type == WHEEL_BLOCK_SCROLL) {
         // Scrolling data is line-based.
@@ -237,12 +262,21 @@ static int post_mouse_wheel_event(uiohook_event * const event, CGEventSourceRef 
         scroll_unit = kCGScrollEventUnitPixel;
     }
 
+    int32_t wheel1 = 0;
+    int32_t wheel2 = 0;
+
+    if (event->data.wheel.direction == WHEEL_HORIZONTAL_DIRECTION) {
+        wheel2 = event->data.wheel.rotation;
+    } else {
+        wheel1 = event->data.wheel.rotation;
+    }
+
     CGEventRef cg_event = CGEventCreateScrollWheelEvent(
         src,
-        kCGScrollEventUnitLine,
-        // TODO Currently only support 1 wheel axis.
-        (CGWheelCount) 1, // 1 for Y-only, 2 for Y-X, 3 for Y-X-Z
-        event->data.wheel.amount * event->data.wheel.rotation
+        scroll_unit,
+        (CGWheelCount) 2, // 1 for Y-only, 2 for Y-X, 3 for Y-X-Z
+        wheel1, // TODO Is this value correct? Do we need PPL?
+        wheel2
     );
 
     if (cg_event == NULL) {
@@ -257,30 +291,29 @@ static int post_mouse_wheel_event(uiohook_event * const event, CGEventSourceRef 
     return UIOHOOK_SUCCESS;
 }
 
-
-// TODO This should return a status code, UIOHOOK_SUCCESS or otherwise.
-UIOHOOK_API void hook_post_event(uiohook_event * const event) {
-    int status = UIOHOOK_FAILURE;
-
+UIOHOOK_API int hook_post_event(uiohook_event * const event) {
     CGEventSourceRef src = CGEventSourceCreate(kCGEventSourceStateHIDSystemState);
     if (src == NULL) {
         logger(LOG_LEVEL_ERROR, "%s [%u]: CGEventSourceCreate failed!\n",
                 __FUNCTION__, __LINE__);
-        return; // UIOHOOK_ERROR_OUT_OF_MEMORY
+        return UIOHOOK_ERROR_OUT_OF_MEMORY;
     }
 
+    int status = UIOHOOK_FAILURE;
     switch (event->type) {
         case EVENT_KEY_PRESSED:
         case EVENT_KEY_RELEASED:
             status = post_key_event(event, src);
             break;
 
-
         case EVENT_MOUSE_PRESSED:
         case EVENT_MOUSE_RELEASED:
+        case EVENT_MOUSE_PRESSED_IGNORE_COORDS:
+        case EVENT_MOUSE_RELEASED_IGNORE_COORDS:
 
         case EVENT_MOUSE_MOVED:
         case EVENT_MOUSE_DRAGGED:
+        case EVENT_MOUSE_MOVED_RELATIVE_TO_CURSOR:
             status = post_mouse_event(event, src);
             break;
 
@@ -296,8 +329,35 @@ UIOHOOK_API void hook_post_event(uiohook_event * const event) {
 
         default:
             logger(LOG_LEVEL_DEBUG, "%s [%u]: Ignoring post event: %#X.\n",
-                __FUNCTION__, __LINE__, event->type);
+                    __FUNCTION__, __LINE__, event->type);
+            status = UIOHOOK_FAILURE;
     }
 
     CFRelease(src);
+
+    return status;
+}
+
+UIOHOOK_API int hook_post_text(const uint16_t * const text) {
+    if (text == NULL) {
+        return UIOHOOK_ERROR_POST_TEXT_NULL;
+    }
+
+    CGEventRef downEvent = CGEventCreateKeyboardEvent(NULL, 0, true);
+    CGEventRef upEvent = CGEventCreateKeyboardEvent(NULL, 0, false);
+
+    UniCharCount count = 0;
+
+    for (int i = 0; text[i] != 0; i++) {
+        count++;
+    }
+
+    CGEventKeyboardSetUnicodeString(downEvent, count, (UniChar*)text);
+    CGEventKeyboardSetUnicodeString(upEvent, count, (UniChar*)text);
+
+    CGEventPost(kCGSessionEventTap, downEvent);
+    CGEventPost(kCGSessionEventTap, upEvent);
+
+    CFRelease(downEvent);
+    CFRelease(upEvent);
 }

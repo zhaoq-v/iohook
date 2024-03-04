@@ -1,5 +1,5 @@
 /* libUIOHook: Cross-platform keyboard and mouse hooking from userland.
- * Copyright (C) 2006-2023 Alexander Barker.  All Rights Reserved.
+ * Copyright (C) 2006-2022 Alexander Barker.  All Rights Reserved.
  * https://github.com/kwhat/libuiohook/
  *
  * libUIOHook is free software: you can redistribute it and/or modify
@@ -16,34 +16,21 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#ifndef _included_input_helper
-#define _included_input_helper
-
-#include <limits.h>
+#include <stdbool.h>
 #include <windows.h>
 
-#define WCH_NONE        0xF000
+extern bool dispatch_hook_enable();
 
-#ifndef WM_MOUSEHWHEEL
-#define WM_MOUSEHWHEEL  0x020E
-#endif
+extern bool dispatch_hook_disable();
 
+extern bool dispatch_key_press(KBDLLHOOKSTRUCT *kbhook);
 
-extern SIZE_T keycode_to_unicode(DWORD keycode, DWORD scancode, PWCHAR buffer, int size);
+extern bool dispatch_key_release(KBDLLHOOKSTRUCT *kbhook);
 
-//extern DWORD unicode_to_keycode(wchar_t unicode);
+extern bool dispatch_button_press(MSLLHOOKSTRUCT *mshook, uint16_t button);
 
-extern unsigned short keycode_to_vcode(DWORD vk_code, DWORD flags);
+extern bool dispatch_button_release(MSLLHOOKSTRUCT *mshook, uint16_t button);
 
-extern DWORD vcode_to_keycode(unsigned short scancode);
+extern bool dispatch_mouse_move(MSLLHOOKSTRUCT *mshook);
 
-/* Set the native modifier mask for future events. */
-extern void set_modifier_mask(uint16_t mask);
-
-/* Unset the native modifier mask for future events. */
-extern void unset_modifier_mask(uint16_t mask);
-
-/* Get the current native modifier mask state. */
-extern uint16_t get_modifiers();
-
-#endif
+extern bool dispatch_mouse_wheel(MSLLHOOKSTRUCT *mshook, uint8_t direction);

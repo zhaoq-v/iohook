@@ -19,136 +19,50 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <uiohook.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
-#ifdef USE_XTEST
 #include <X11/extensions/XTest.h>
-#endif
 
 #include "input_helper.h"
 #include "logger.h"
 
-#ifndef USE_XTEST
-static long current_modifier_mask = NoEventMask;
-#endif
+static uint64_t post_text_delay = 50 * 1000000;
+
+UIOHOOK_API uint64_t hook_get_post_text_delay_x11() {
+    return post_text_delay;
+}
+
+UIOHOOK_API void hook_set_post_text_delay_x11(uint64_t delay) {
+    post_text_delay = delay;
+}
 
 static int post_key_event(uiohook_event * const event) {
-    KeyCode keycode = scancode_to_keycode(event->data.keyboard.keycode);
+    load_key_mappings();
+    KeyCode keycode = vcode_to_keycode(event->data.keyboard.keycode);
     if (keycode == 0x0000) {
         logger(LOG_LEVEL_WARN, "%s [%u]: Unable to lookup scancode: %li\n",
                 __FUNCTION__, __LINE__, event->data.keyboard.keycode);
         return UIOHOOK_FAILURE;
     }
 
-    #ifdef USE_XTEST
     Bool is_pressed;
-    #else
-    long event_mask;
-
-    XKeyEvent key_event = {
-        .serial = 0x00,
-        .time = CurrentTime,
-        .same_screen = True,
-        .send_event = False,
-        .display = helper_disp,
-
-        .root = XDefaultRootWindow(helper_disp),
-        .window = None,
-        .subwindow = None,
-
-        .x_root = 0,
-        .y_root = 0,
-        .x = 0,
-        .y = 0,
-
-        .state = current_modifier_mask,
-        .keycode = keycode
-    };
-
-    int revert;
-    XGetInputFocus(helper_disp, &(key_event.window), &revert);
-    #endif
-
     if (event->type == EVENT_KEY_PRESSED) {
-        #ifdef USE_XTEST
         is_pressed = True;
-        #else
-        key_event.type = KeyPress;
-        event_mask = KeyPressMask;
-
-        switch (event->data.keyboard.keycode) {
-            case VC_SHIFT_L:
-            case VC_SHIFT_R:
-                current_modifier_mask |= ShiftMask;
-                break;
-
-            case VC_CONTROL_L:
-            case VC_CONTROL_R:
-                current_modifier_mask |= ControlMask;
-                break;
-
-            case VC_META_L:
-            case VC_META_R:
-                current_modifier_mask |= Mod4Mask;
-                break;
-
-            case VC_ALT_L:
-            case VC_ALT_R:
-                current_modifier_mask |= Mod1Mask;
-                break;
-        }
-        #endif
-
     } else if (event->type == EVENT_KEY_RELEASED) {
-        #ifdef USE_XTEST
         is_pressed = False;
-        #else
-        key_event.type = KeyRelease;
-        event_mask = KeyReleaseMask;
-
-        switch (event->data.keyboard.keycode) {
-            case VC_SHIFT_L:
-            case VC_SHIFT_R:
-                current_modifier_mask &= ~ShiftMask;
-                break;
-
-            case VC_CONTROL_L:
-            case VC_CONTROL_R:
-                current_modifier_mask &= ~ControlMask;
-                break;
-
-            case VC_META_L:
-            case VC_META_R:
-                current_modifier_mask &= ~Mod4Mask;
-                break;
-
-            case VC_ALT_L:
-            case VC_ALT_R:
-                current_modifier_mask &= ~Mod1Mask;
-                break;
-        }
-        #endif
     } else {
         logger(LOG_LEVEL_DEBUG, "%s [%u]: Invalid event for keyboard post event: %#X.\n",
-            __FUNCTION__, __LINE__, event->type);
+                __FUNCTION__, __LINE__, event->type);
         return UIOHOOK_FAILURE;
     }
 
-    #ifdef USE_XTEST
-    if (XTestFakeKeyEvent(helper_disp, keycode, is_pressed, 0) != Success) {
+    if (!XTestFakeKeyEvent(helper_disp, keycode, is_pressed, 0)) {
         logger(LOG_LEVEL_ERROR, "%s [%u]: XTestFakeKeyEvent() failed!\n",
-            __FUNCTION__, __LINE__, event->type);
+                __FUNCTION__, __LINE__);
         return UIOHOOK_FAILURE;
     }
-    #else
-    XSelectInput(helper_disp, key_event.window, KeyPressMask | KeyReleaseMask);
-    if (XSendEvent(helper_disp, key_event.window, False, event_mask, (XEvent *) &key_event) == 0) {
-        logger(LOG_LEVEL_ERROR, "%s [%u]: XSendEvent() failed!\n",
-            __FUNCTION__, __LINE__, event->type);
-        return UIOHOOK_FAILURE;
-    }
-    #endif
 
     return UIOHOOK_SUCCESS;
 }
@@ -159,254 +73,163 @@ static int post_mouse_button_event(uiohook_event * const event) {
         .send_event = False,
         .display = helper_disp,
 
-        .window = None,                                   /* “event” window it is reported relative to */
-        .root = None,                                     /* root window that the event occurred on */
-        .subwindow = XDefaultRootWindow(helper_disp),     /* child window */
+        .window = None,                                /* “event” window it is reported relative to */
+        .root = None,                                  /* root window that the event occurred on */
+        .subwindow = XDefaultRootWindow(helper_disp),  /* child window */
 
         .time = CurrentTime,
 
-        .x = event->data.mouse.x,                         /* pointer x, y coordinates in event window */
+        .x = event->data.mouse.x,                      /* pointer x, y coordinates in event window */
         .y = event->data.mouse.y,
 
-        .x_root = 0,                                      /* coordinates relative to root */
+        .x_root = 0,                                   /* coordinates relative to root */
         .y_root = 0,
 
-        .state = 0x00,                                    /* key or button mask */
+        .state = 0x00,                                 /* key or button mask */
         .same_screen = True
     };
 
-    // Move the pointer to the specified position.
-    #ifdef USE_XTEST
-    XTestFakeMotionEvent(btn_event.display, -1, btn_event.x, btn_event.y, 0);
-    #else
-    XWarpPointer(btn_event.display, None, btn_event.subwindow, 0, 0, 0, 0, btn_event.x, btn_event.y);
-    XFlush(btn_event.display);
-    #endif
-
-    #ifndef USE_XTEST
-    // FIXME This is still not working correctly, clicking on other windows does not yield focus.
-    while (btn_event.subwindow != None)
-    {
-        btn_event.window = btn_event.subwindow;
-        XQueryPointer (
-            btn_event.display,
-            btn_event.window,
-            &btn_event.root,
-            &btn_event.subwindow,
-            &btn_event.x_root,
-            &btn_event.y_root,
-            &btn_event.x,
-            &btn_event.y,
-            &btn_event.state
-        );
+    if (!(event->type == EVENT_MOUSE_PRESSED_IGNORE_COORDS || event->type == EVENT_MOUSE_RELEASED_IGNORE_COORDS)) {
+        // Move the pointer to the specified position.
+        XTestFakeMotionEvent(btn_event.display, -1, btn_event.x, btn_event.y, 0);
     }
-    #endif
 
+    int status = UIOHOOK_FAILURE;
     switch (event->type) {
         case EVENT_MOUSE_PRESSED:
-            #ifdef USE_XTEST
+        case EVENT_MOUSE_PRESSED_IGNORE_COORDS:
             if (event->data.mouse.button < MOUSE_BUTTON1 || event->data.mouse.button > MOUSE_BUTTON5) {
                 logger(LOG_LEVEL_WARN, "%s [%u]: Invalid button specified for mouse pressed event! (%u)\n",
                         __FUNCTION__, __LINE__, event->data.mouse.button);
                 return UIOHOOK_FAILURE;
             }
 
-            XTestFakeButtonEvent(helper_disp, event->data.mouse.button, True, 0);
-            #else
-            if (event->data.mouse.button == MOUSE_BUTTON1) {
-                current_modifier_mask |= Button1MotionMask;
-            } else if (event->data.mouse.button == MOUSE_BUTTON2) {
-                current_modifier_mask |= Button2MotionMask;
-            } else if (event->data.mouse.button == MOUSE_BUTTON3) {
-                current_modifier_mask |= Button3MotionMask;
-            } else if (event->data.mouse.button == MOUSE_BUTTON4) {
-                current_modifier_mask |= Button4MotionMask;
-            } else if (event->data.mouse.button == MOUSE_BUTTON5) {
-                current_modifier_mask |= Button5MotionMask;
-            } else {
-                logger(LOG_LEVEL_WARN, "%s [%u]: Invalid button specified for mouse pressed event! (%u)\n",
-                        __FUNCTION__, __LINE__, event->data.mouse.button);
-                return UIOHOOK_FAILURE;
+            if (XTestFakeButtonEvent(helper_disp, event->data.mouse.button, True, 0) != 0) {
+                status = UIOHOOK_SUCCESS;
             }
-
-            btn_event.type = ButtonPress;
-            btn_event.button = event->data.mouse.button;
-            btn_event.state = current_modifier_mask;
-            XSendEvent(helper_disp, btn_event.window, False, ButtonPressMask, (XEvent *) &btn_event);
-            #endif
             break;
 
         case EVENT_MOUSE_RELEASED:
-            #ifdef USE_XTEST
+        case EVENT_MOUSE_RELEASED_IGNORE_COORDS:
             if (event->data.mouse.button < MOUSE_BUTTON1 || event->data.mouse.button > MOUSE_BUTTON5) {
                 logger(LOG_LEVEL_WARN, "%s [%u]: Invalid button specified for mouse released event! (%u)\n",
                         __FUNCTION__, __LINE__, event->data.mouse.button);
                 return UIOHOOK_FAILURE;
             }
 
-            XTestFakeButtonEvent(helper_disp, event->data.mouse.button, False, 0);
-            #else
-            if (event->data.mouse.button == MOUSE_BUTTON1) {
-                current_modifier_mask &= ~Button1MotionMask;
-            } else if (event->data.mouse.button == MOUSE_BUTTON2) {
-                current_modifier_mask &= ~Button2MotionMask;
-            } else if (event->data.mouse.button == MOUSE_BUTTON3) {
-                current_modifier_mask &= ~Button3MotionMask;
-            } else if (event->data.mouse.button == MOUSE_BUTTON4) {
-                current_modifier_mask &= ~Button4MotionMask;
-            } else if (event->data.mouse.button == MOUSE_BUTTON5) {
-                current_modifier_mask &= ~Button5MotionMask;
-            } else {
-                logger(LOG_LEVEL_WARN, "%s [%u]: Invalid button specified for mouse released event! (%u)\n",
-                        __FUNCTION__, __LINE__, event->data.mouse.button);
-                return UIOHOOK_FAILURE;
+            if (XTestFakeButtonEvent(helper_disp, event->data.mouse.button, False, 0) != 0) {
+                status = UIOHOOK_SUCCESS;
             }
-
-            btn_event.type = ButtonRelease;
-            btn_event.button = event->data.mouse.button;
-            btn_event.state = current_modifier_mask;
-            XSendEvent(helper_disp, btn_event.window, False, ButtonReleaseMask, (XEvent *) &btn_event);
-            #endif
             break;
 
         default:
             logger(LOG_LEVEL_DEBUG, "%s [%u]: Invalid mouse button event: %#X.\n",
-                __FUNCTION__, __LINE__, event->type);
-            return UIOHOOK_FAILURE;
+                    __FUNCTION__, __LINE__, event->type);
+            status = UIOHOOK_FAILURE;
     }
 
-    return UIOHOOK_SUCCESS;
+    return status;
 }
 
 static int post_mouse_wheel_event(uiohook_event * const event) {
+    int status = UIOHOOK_FAILURE;
+
     XButtonEvent btn_event = {
         .serial = 0,
         .send_event = False,
         .display = helper_disp,
 
-        .window = None,                                   /* “event” window it is reported relative to */
-        .root = None,                                     /* root window that the event occurred on */
-        .subwindow = XDefaultRootWindow(helper_disp),     /* child window */
+        .window = None,                                /* “event” window it is reported relative to */
+        .root = None,                                  /* root window that the event occurred on */
+        .subwindow = XDefaultRootWindow(helper_disp),  /* child window */
 
         .time = CurrentTime,
 
-        .x = event->data.wheel.x,                         /* pointer x, y coordinates in event window */
+        .x = event->data.wheel.x,                      /* pointer x, y coordinates in event window */
         .y = event->data.wheel.y,
 
-        .x_root = 0,                                      /* coordinates relative to root */
+        .x_root = 0,                                   /* coordinates relative to root */
         .y_root = 0,
 
-        .state = 0x00,                                    /* key or button mask */
+        .state = 0x00,                                 /* key or button mask */
         .same_screen = True
     };
 
-    #ifndef USE_XTEST
-    // FIXME This is still not working correctly, clicking on other windows does not yield focus.
-    while (btn_event.subwindow != None)
-    {
-        btn_event.window = btn_event.subwindow;
-        XQueryPointer (
-            btn_event.display,
-            btn_event.window,
-            &btn_event.root,
-            &btn_event.subwindow,
-            &btn_event.x_root,
-            &btn_event.y_root,
-            &btn_event.x,
-            &btn_event.y,
-            &btn_event.state
-        );
-    }
-    #endif
-
     // Wheel events should be the same as click events on X11.
-    // type, amount and rotation
-    unsigned int button = button_map_lookup(event->data.wheel.rotation < 0 ? WheelUp : WheelDown);
 
-    #ifdef USE_XTEST
-    XTestFakeButtonEvent(helper_disp, button, True, 0);
-    #else
-    btn_event.type = ButtonPress;
-    btn_event.button = button;
-    btn_event.state = current_modifier_mask;
-    XSendEvent(helper_disp, btn_event.window, False, ButtonPressMask, (XEvent *) &btn_event);
-    #endif
+    uint8_t wheel_button = 0;
 
-    #ifdef USE_XTEST
-    XTestFakeButtonEvent(helper_disp, button, False, 0);
-    #else
-    btn_event.type = ButtonRelease;
-    btn_event.button = button;
-    btn_event.state = current_modifier_mask;
-    XSendEvent(helper_disp, btn_event.window, False, ButtonReleaseMask, (XEvent *) &btn_event);
-    #endif
+    if (event->data.wheel.direction == WHEEL_HORIZONTAL_DIRECTION) {
+        wheel_button = event->data.wheel.rotation > 0 ? WheelRight : WheelLeft;
+    } else {
+        wheel_button = event->data.wheel.rotation > 0 ? WheelUp : WheelDown;
+    }
+
+    unsigned int button = button_map_lookup(wheel_button);
+
+    if (XTestFakeButtonEvent(helper_disp, button, True, 0) != 0) {
+        status = UIOHOOK_SUCCESS;
+    }
+
+    if (status == UIOHOOK_SUCCESS && XTestFakeButtonEvent(helper_disp, button, False, 0) == 0) {
+        status = UIOHOOK_FAILURE;
+    }
 
     return UIOHOOK_SUCCESS;
 }
 
-static void post_mouse_motion_event(uiohook_event * const event) {
-    #ifdef USE_XTEST
-    XTestFakeMotionEvent(helper_disp, -1, event->data.mouse.x, event->data.mouse.y, 0);
-    #else
-    XMotionEvent mov_event = {
-        .type = MotionNotify,
-        .serial = 0,
-        .send_event = False,
-        .display = helper_disp,
+static int post_mouse_motion_event(uiohook_event * const event) {
+    int status = UIOHOOK_FAILURE;
 
-        .window = None,                                   /* “event” window it is reported relative to */
-        .root = XDefaultRootWindow(helper_disp),      /* root window that the event occurred on */
-        .subwindow = None,                                /* child window */
+    if (event->type == EVENT_MOUSE_MOVED_RELATIVE_TO_CURSOR) {
+        Window window;
+        int x, y;
+        unsigned int mask;
+        if (XQueryPointer(helper_disp, XDefaultRootWindow(helper_disp), &window, &window, &x, &y, &x, &y, &mask) != 0) {
+            if (XTestFakeMotionEvent(helper_disp, -1, x + event->data.mouse.x, y + event->data.mouse.y, 0) != 0) {
+                status = UIOHOOK_SUCCESS;
+            }
+        }
+    } else {
+        if (XTestFakeMotionEvent(helper_disp, -1, event->data.mouse.x, event->data.mouse.y, 0) != 0) {
+            status = UIOHOOK_SUCCESS;
+        }
+    }
 
-        .time = CurrentTime,
-
-        .x = event->data.mouse.x,                         /* pointer x, y coordinates in event window */
-        .y = event->data.mouse.y,
-
-        .x_root = event->data.mouse.x,                    /* coordinates relative to root */
-        .y_root = event->data.mouse.x,
-
-        .state = current_modifier_mask|MotionNotify,      /* key or button mask */
-
-        .is_hint = NotifyNormal,
-        .same_screen = True
-    };
-
-    int revert;
-    XGetInputFocus(helper_disp, &(mov_event.window), &revert);
-
-    XSendEvent(helper_disp, mov_event.window, False, mov_event.state, (XEvent *) &mov_event);
-    #endif
+    return status;
 }
 
-// TODO This should return a status code, UIOHOOK_SUCCESS or otherwise.
-UIOHOOK_API void hook_post_event(uiohook_event * const event) {
+UIOHOOK_API int hook_post_event(uiohook_event * const event) {
     if (helper_disp == NULL) {
         logger(LOG_LEVEL_ERROR, "%s [%u]: XDisplay helper_disp is unavailable!\n",
-            __FUNCTION__, __LINE__);
-        return; // UIOHOOK_ERROR_X_OPEN_DISPLAY
+                __FUNCTION__, __LINE__);
+        return UIOHOOK_ERROR_X_OPEN_DISPLAY;
     }
 
     XLockDisplay(helper_disp);
 
+    int status = UIOHOOK_FAILURE;
     switch (event->type) {
         case EVENT_KEY_PRESSED:
         case EVENT_KEY_RELEASED:
-            post_key_event(event);
+            status = post_key_event(event);
             break;
 
         case EVENT_MOUSE_PRESSED:
         case EVENT_MOUSE_RELEASED:
-            post_mouse_button_event(event);
+        case EVENT_MOUSE_PRESSED_IGNORE_COORDS:
+        case EVENT_MOUSE_RELEASED_IGNORE_COORDS:
+            status = post_mouse_button_event(event);
             break;
 
         case EVENT_MOUSE_WHEEL:
-            post_mouse_wheel_event(event);
+            status = post_mouse_wheel_event(event);
             break;
 
         case EVENT_MOUSE_MOVED:
         case EVENT_MOUSE_DRAGGED:
-            post_mouse_motion_event(event);
+        case EVENT_MOUSE_MOVED_RELATIVE_TO_CURSOR:
+            status = post_mouse_motion_event(event);
             break;
 
         case EVENT_KEY_TYPED:
@@ -417,11 +240,197 @@ UIOHOOK_API void hook_post_event(uiohook_event * const event) {
 
         default:
             logger(LOG_LEVEL_WARN, "%s [%u]: Ignoring post event type %#X\n",
-                __FUNCTION__, __LINE__, event->type);
-            break;
+                    __FUNCTION__, __LINE__, event->type);
+            status = UIOHOOK_FAILURE;
     }
 
-    // Don't forget to flush!
     XSync(helper_disp, True);
     XUnlockDisplay(helper_disp);
+
+    return status;
+}
+
+int is_surrogate(uint16_t uc) {
+    return (uc - 0xD800U) < 2048U;
+}
+
+int is_high_surrogate(uint16_t uc) {
+    return (uc & 0xFFFFFC00) == 0xD800;
+}
+
+int is_low_surrogate(uint16_t uc) {
+    return (uc & 0xFFFFFC00) == 0xDC00;
+}
+
+uint32_t surrogate_to_utf32(uint16_t high, uint16_t low) {
+    return (high << 10) + low - 0x35FDC00;
+}
+
+uint32_t *convert_utf16_to_utf32(const uint16_t * input, size_t count) {
+    const uint16_t * const end = input + count;
+    uint32_t *result = (uint32_t*)calloc(count + 1, sizeof(uint32_t));
+    uint32_t *output = result;
+
+    while (input < end) {
+        const uint16_t uc = *input++;
+        if (!is_surrogate(uc)) {
+            *output++ = uc;
+        } else {
+            *output++ = is_high_surrogate(uc) && input < end && is_low_surrogate(*input)
+                ? surrogate_to_utf32(uc, *input++)
+                : 0xFFFD;
+        }
+    }
+
+    return result;
+}
+
+KeySym *map_to_keysyms(const uint16_t * const text, size_t count, size_t *keysym_count) {
+    uint32_t *utf32_text = convert_utf16_to_utf32(text, count);
+
+    KeySym *keysyms = (KeySym*)calloc(count, sizeof(KeySym));
+
+    size_t i = 0;
+    for (; utf32_text[i] != 0; i++) {
+        char str[9] = { 0 };
+        sprintf(str, "U%04X", utf32_text[i]);
+        keysyms[i] = XStringToKeysym(str);
+    }
+
+    *keysym_count = i;
+    free(utf32_text);
+
+    return keysyms;
+}
+
+KeyCode find_unused_keycode() {
+    int min_keycode = 0, max_keycode = 0;
+    if (!XDisplayKeycodes(helper_disp, &min_keycode, &max_keycode)) {
+        logger(LOG_LEVEL_ERROR, "%s [%u]: XDisplayKeycodes() failed!\n",
+                __FUNCTION__, __LINE__);
+        return 0;
+    }
+
+    size_t unused_keycodes_count = 0;
+
+    for (KeyCode keycode = max_keycode; keycode >= min_keycode; keycode--) {
+        int keysyms_per_keycode = 0;
+        KeySym *keycode_keysyms = XGetKeyboardMapping(helper_disp, keycode, 1, &keysyms_per_keycode);
+        int used = false;
+
+        for (int i = 0; i < keysyms_per_keycode; i++) {
+            if (keycode_keysyms[i] != NoSymbol) {
+                used = true;
+                break;
+            }
+        }
+
+        if (!XFree(keycode_keysyms)) {
+            logger(LOG_LEVEL_ERROR, "%s [%u]: XFree() failed!\n",
+                    __FUNCTION__, __LINE__);
+            return 0;
+        }
+
+        if (!used) {
+            return keycode;
+        }
+    }
+
+    return 0;
+}
+
+int post_keysym(KeySym keysym, KeyCode keycode) {
+    KeySym keysyms[4] = { keysym, keysym, keysym, keysym }; // Use the same KeySym for 4 shift levels
+    int result = XChangeKeyboardMapping(helper_disp, keycode, 4, keysyms, 1);
+    if (result != Success) {
+        logger(LOG_LEVEL_ERROR, "%s [%u]: XChangeKeyboardMapping() failed! (%d)\n",
+                __FUNCTION__, __LINE__, result);
+        return UIOHOOK_FAILURE;
+    }
+
+    XSync(helper_disp, True);
+
+    struct timespec ts = {
+        .tv_sec = post_text_delay / 1000000000,
+        .tv_nsec = post_text_delay % 1000000000
+    };
+
+    nanosleep(&ts, NULL);
+
+    if (!XTestFakeKeyEvent(helper_disp, keycode, true, 0)) {
+        logger(LOG_LEVEL_ERROR, "%s [%u]: XTestFakeKeyEvent() failed!\n",
+                __FUNCTION__, __LINE__);
+        return UIOHOOK_FAILURE;
+    }
+
+    XSync(helper_disp, True);
+
+    if (!XTestFakeKeyEvent(helper_disp, keycode, false, 0)) {
+        logger(LOG_LEVEL_ERROR, "%s [%u]: XTestFakeKeyEvent() failed!\n",
+                __FUNCTION__, __LINE__);
+        return UIOHOOK_FAILURE;
+    }
+
+    XSync(helper_disp, True);
+
+    nanosleep(&ts, NULL);
+
+    return UIOHOOK_SUCCESS;
+}
+
+UIOHOOK_API int hook_post_text(const uint16_t * const text) {
+    if (text == NULL) {
+        return UIOHOOK_ERROR_POST_TEXT_NULL;
+    }
+
+    if (helper_disp == NULL) {
+        logger(LOG_LEVEL_ERROR, "%s [%u]: XDisplay helper_disp is unavailable!\n",
+                __FUNCTION__, __LINE__);
+        return UIOHOOK_ERROR_X_OPEN_DISPLAY;
+    }
+
+    XLockDisplay(helper_disp);
+
+    size_t count = 0;
+
+    for (int i = 0; text[i] != 0; i++) {
+        count++;
+    }
+
+    KeyCode unused_keycode = find_unused_keycode();
+
+    if (unused_keycode == 0) {
+        logger(LOG_LEVEL_ERROR, "%s [%u]: Cannot find an unused key code!\n",
+                __FUNCTION__, __LINE__);
+
+        XUnlockDisplay(helper_disp);
+        return UIOHOOK_FAILURE;
+    }
+
+    size_t keysym_count = 0;
+    KeySym *keysyms = map_to_keysyms(text, count, &keysym_count);
+
+    int status = UIOHOOK_SUCCESS;
+
+    for (size_t i = 0; i < keysym_count; i++) {
+        if (post_keysym(keysyms[i], unused_keycode) != UIOHOOK_SUCCESS) {
+            status = UIOHOOK_FAILURE;
+            break;
+        }
+    }
+
+    free(keysyms);
+
+    KeySym keysym = NoSymbol;
+    int result = XChangeKeyboardMapping(helper_disp, unused_keycode, 1, &keysym, 1);
+    if (result != Success) {
+        logger(LOG_LEVEL_ERROR, "%s [%u]: XChangeKeyboardMapping() failed! (%d)\n",
+                __FUNCTION__, __LINE__, result);
+        return UIOHOOK_FAILURE;
+    }
+
+    XSync(helper_disp, True);
+    XUnlockDisplay(helper_disp);
+
+    return status;
 }

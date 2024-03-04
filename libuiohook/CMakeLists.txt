@@ -15,9 +15,9 @@
 # You should have received a copy of the GNU Lesser General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.19.5)
 
-project(uiohook VERSION 1.2.0 LANGUAGES C)
+project(uiohook VERSION 1.3.0 LANGUAGES C)
 
 
 if (WIN32 OR WIN64)
@@ -28,13 +28,26 @@ else()
     set(UIOHOOK_SOURCE_DIR "x11")
 endif()
 
-add_library(uiohook
-    "src/logger.c"
-    "src/${UIOHOOK_SOURCE_DIR}/input_helper.c"
-    "src/${UIOHOOK_SOURCE_DIR}/input_hook.c"
-    "src/${UIOHOOK_SOURCE_DIR}/post_event.c"
-    "src/${UIOHOOK_SOURCE_DIR}/system_properties.c"
-)
+if (WIN32 OR WIN64)
+    add_library(uiohook
+        "src/logger.c"
+        "src/${UIOHOOK_SOURCE_DIR}/dispatch_event.c"
+        "src/${UIOHOOK_SOURCE_DIR}/input_helper.c"
+        "src/${UIOHOOK_SOURCE_DIR}/input_hook.c"
+        "src/${UIOHOOK_SOURCE_DIR}/post_event.c"
+        "src/${UIOHOOK_SOURCE_DIR}/system_properties.c"
+        "src/${UIOHOOK_SOURCE_DIR}/monitor_helper.c"
+    )
+else()
+    add_library(uiohook
+        "src/logger.c"
+        "src/${UIOHOOK_SOURCE_DIR}/dispatch_event.c"
+        "src/${UIOHOOK_SOURCE_DIR}/input_helper.c"
+        "src/${UIOHOOK_SOURCE_DIR}/input_hook.c"
+        "src/${UIOHOOK_SOURCE_DIR}/post_event.c"
+        "src/${UIOHOOK_SOURCE_DIR}/system_properties.c"
+    )
+endif ()
 
 set_target_properties(uiohook PROPERTIES
     C_STANDARD 99
@@ -130,6 +143,10 @@ if(ENABLE_TEST)
     target_link_libraries(uiohook_tests uiohook "${CMAKE_THREAD_LIBS_INIT}")
 endif()
 
+option(USE_EPOCH_TIME "Use Unix epoch time for event timestamps (default: ON)" ON)
+if(USE_EPOCH_TIME)
+    add_compile_definitions(uiohook PRIVATE USE_EPOCH_TIME)
+endif()
 
 if(UNIX AND NOT APPLE)
     find_package(PkgConfig REQUIRED)
@@ -147,26 +164,6 @@ if(UNIX AND NOT APPLE)
 
     include(CheckIncludeFile)
     check_include_file(X11/extensions/record.h HAVE_RECORD_H "-include X11/Xlib.h")
-
-    option(USE_XKB_COMMON "X Keyboard Common Extension (default: ON)" ON)
-    if(USE_XKB_COMMON)
-        pkg_check_modules(XKB_COMMON REQUIRED xkbcommon-x11)
-        add_compile_definitions(uiohook PRIVATE USE_XKB_COMMON)
-        target_include_directories(uiohook PRIVATE "${XKB_COMMON_INCLUDE_DIRS}")
-        target_link_libraries(uiohook "${XKB_COMMON_LDFLAGS}")
-
-        pkg_check_modules(X11_XCB REQUIRED x11-xcb)
-        target_include_directories(uiohook PRIVATE "${X11_XCB_INCLUDE_DIRS}")
-        target_link_libraries(uiohook "${X11_XCB_LDFLAGS}")
-    endif()
-
-    option(USE_XKB_FILE "X Keyboard File Extension (default: ON)" ON)
-    if(USE_XKB_FILE)
-        pkg_check_modules(XKB_FILE REQUIRED xkbfile)
-        add_compile_definitions(uiohook PRIVATE USE_XKB_FILE)
-        target_include_directories(uiohook PRIVATE "${XKB_FILE_INCLUDE_DIRS}")
-        target_link_libraries(uiohook "${XKB_FILE_LDFLAGS}")
-    endif()
 
     option(USE_XT "X Toolkit Extension (default: ON)" ON)
     if(USE_XT)
@@ -206,12 +203,6 @@ if(UNIX AND NOT APPLE)
         add_compile_definitions(uiohook PRIVATE USE_XRECORD_ASYNC)
     endif()
 
-    option(USE_XTEST "XTest API (default: ON)" ON)
-    if(USE_XTEST)
-        # XTest API is provided by Xtst
-        add_compile_definitions(uiohook PRIVATE USE_XTEST)
-    endif()
-
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         option(USE_EVDEV "Generic Linux input driver (default: ON)" ON)
         if(USE_EVDEV)
@@ -220,14 +211,25 @@ if(UNIX AND NOT APPLE)
     endif()
 elseif(APPLE)
     set(CMAKE_MACOSX_RPATH 1)
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "10.5")
 
-    find_package(Threads REQUIRED)
-    target_link_libraries(uiohook "${CMAKE_THREAD_LIBS_INIT}")
+    option(MAC_CATALYST "Build for Mac Catalyst (default: OFF)" OFF)
+    if(MAC_CATALYST)
+        add_compile_definitions(uiohook PRIVATE MAC_CATALYST)
+        find_library(CORE_FOUNDATION CoreFoundation REQUIRED)
+        target_include_directories(uiohook PRIVATE "${CORE_FOUNDATION}")
+        target_link_libraries(uiohook "${CORE_FOUNDATION}")
+        find_library(CORE_GRAPHICS CoreGraphics REQUIRED)
+        target_include_directories(uiohook PRIVATE "${CORE_GRAPHICS}")
+        target_link_libraries(uiohook "${CORE_GRAPHICS}")
+    else()
+        set(CMAKE_OSX_DEPLOYMENT_TARGET "10.15")
+        find_package(Threads REQUIRED)
+        target_link_libraries(uiohook "${CMAKE_THREAD_LIBS_INIT}")
 
-    find_library(CARBON Carbon REQUIRED)
-    target_include_directories(uiohook PRIVATE "${CARBON}")
-    target_link_libraries(uiohook "${CARBON}")
+        find_library(CARBON Carbon REQUIRED)
+        target_include_directories(uiohook PRIVATE "${CARBON}")
+        target_link_libraries(uiohook "${CARBON}")
+    endif()
 
     option(USE_APPLICATION_SERVICES "ApplicationServices framework (default: ON)" ON)
     if(USE_APPLICATION_SERVICES)
@@ -245,30 +247,12 @@ elseif(APPLE)
         target_link_libraries(uiohook "${IOKIT}")
     endif()
 
-    # FIXME Change USE_OBJC flag to USE_APPKIT
-    #option(USE_APPKIT "AppKit framework (default: ON)" ON)
-    option(USE_OBJC "Objective-C API (default: ON)" ON)
-    if(USE_OBJC)
-        # FIXME Drop USE_OBJC as it is included in AppKit
-        find_library(OBJC objc REQUIRED)
-        add_compile_definitions(USE_OBJC)
-        target_include_directories(uiohook PRIVATE "${OBJC}")
-        target_link_libraries(uiohook "${OBJC}")
-
+    option(USE_APPKIT "AppKit framework (default: ON)" ON)
+    if(USE_APPKIT)
         find_library(APPKIT AppKit REQUIRED)
         add_compile_definitions(USE_APPKIT)
         target_include_directories(uiohook PRIVATE "${APPKIT}")
         target_link_libraries(uiohook "${APPKIT}")
-    endif()
-
-    option(USE_CARBON_LEGACY "Legacy Carbon framework functionality (default: OFF)" OFF)
-    if(USE_CARBON_LEGACY)
-        message(DEPRECATION "Legacy Carbon functionality has been deprecated.")
-        add_compile_definitions(USE_CARBON_LEGACY)
-
-        if(USE_CARBON_LEGACY AND CMAKE_SIZEOF_VOID_P EQUAL 8)
-            message(WARNING "Legacy Carbon functionality should not be used with 64-bit targets.")
-        endif()
     endif()
 elseif(WIN32)
     target_link_libraries(uiohook Advapi32)

@@ -35,39 +35,77 @@
 static uiohook_event *event = NULL;
 
 
-bool logger_proc(unsigned int level, const char *format, ...) {
-    bool status = false;
-
-    va_list args;
+static void logger_proc(unsigned int level, void *user_data, const char *format, va_list args) {
     switch (level) {
         case LOG_LEVEL_INFO:
-            va_start(args, format);
-            status = vfprintf(stdout, format, args) >= 0;
-            va_end(args);
+            vfprintf(stdout, format, args);
             break;
 
         case LOG_LEVEL_WARN:
         case LOG_LEVEL_ERROR:
-            va_start(args, format);
-            status = vfprintf(stderr, format, args) >= 0;
-            va_end(args);
+            vfprintf(stderr, format, args);
             break;
     }
+}
 
-    return status;
+static void logger(unsigned int level, const char *format, ...) {
+    va_list args;
+
+    va_start(args, format);
+    logger_proc(level, NULL, format, args);
+    va_end(args);
 }
 
 // TODO Implement CLI options.
 //int main(int argc, char *argv[]) {
 int main() {
     // Set the logger callback for library output.
-    hook_set_logger_proc(&logger_proc);
+    hook_set_logger_proc(&logger_proc, NULL);
 
     // Allocate memory for the virtual events only once.
     event = (uiohook_event *) malloc(sizeof(uiohook_event));
     if (event == NULL) {
         return UIOHOOK_ERROR_OUT_OF_MEMORY;
     }
+
+    sleep(1);
+
+    //* Move the mouse cursor in a square shape relative to the current mouse position.
+    // Affected by dpi on Windows.
+    event->type = EVENT_MOUSE_MOVED_RELATIVE_TO_CURSOR;
+    event->data.mouse.x = 0;
+    event->data.mouse.y = 100;
+    hook_post_event(event);
+
+    sleep(1);
+
+    event->data.mouse.x = 100;
+    event->data.mouse.y = 0;
+    hook_post_event(event);
+
+    sleep(1);
+
+    event->data.mouse.x = 0;
+    event->data.mouse.y = -100;
+    hook_post_event(event);
+
+    sleep(1);
+
+    event->data.mouse.x = -100;
+    event->data.mouse.y = 0;
+    hook_post_event(event);
+    //*/
+
+    sleep(1);
+
+    //* Right mouse button click at current mouse location
+    event->type = EVENT_MOUSE_PRESSED_IGNORE_COORDS;
+    event->data.mouse.button = MOUSE_BUTTON2;
+    hook_post_event(event);
+
+    event->type = EVENT_MOUSE_RELEASED_IGNORE_COORDS;
+    hook_post_event(event);
+    //*/
 
     sleep(1);
 
@@ -134,8 +172,8 @@ int main() {
 
     event->data.wheel.x = 675;
     event->data.wheel.y = 675;
-    event->data.wheel.amount = 3;
-    event->data.wheel.rotation = 1;
+    event->data.wheel.rotation = 300;
+    event->data.wheel.delta = 100;
     hook_post_event(event);
     //*/
 

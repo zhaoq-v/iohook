@@ -22,6 +22,7 @@
 
 #include "input_helper.h"
 #include "logger.h"
+#include "monitor_helper.h"
 
 // Some buggy versions of MinGW and MSys do not include these constants in winuser.h.
 #ifndef MAPVK_VK_TO_VSC
@@ -47,33 +48,45 @@
 #define KEYEVENTF_KEYDOWN       0x0000
 #endif
 
-#define MAX_WINDOWS_COORD_VALUE (1 << 16)
+#define MAX_WINDOWS_COORD_VALUE ((1 << 16) - 1)
 
-// TODO I doubt this table is complete.
-// http://letcoderock.blogspot.fr/2011/10/sendinput-with-shift-key-not-work.html
-static const uint16_t extend_key_table[10] = {
-    VK_UP,
-    VK_DOWN,
-    VK_LEFT,
-    VK_RIGHT,
-    VK_HOME,
-    VK_END,
-    VK_PRIOR, // PgUp
-    VK_NEXT,  //  PgDn
-    VK_INSERT,
-    VK_DELETE
-};
+typedef struct {
+    LONG x;
+    LONG y;
+} normalized_coordinates;
 
+UIOHOOK_API uint64_t hook_get_post_text_delay_x11() {
+    // Not applicable on Windows, so does nothing
+    return 0;
+}
 
-static LONG convert_to_relative_position(int coordinate, int screen_size) {
-    // See https://stackoverflow.com/a/4555214 and its comments
-	int offset = (coordinate > 0 ? 1 : -1); // Negative coordinates appear when using multiple monitors
-	return ((coordinate * MAX_WINDOWS_COORD_VALUE) / screen_size) + offset;
+UIOHOOK_API void hook_set_post_text_delay_x11(uint64_t delay) {
+    // Not applicable on Windows, so does nothing
+}
+
+static LONG get_absolute_coordinate(LONG coordinate, int screen_size) {
+    return MulDiv((int) coordinate, MAX_WINDOWS_COORD_VALUE, screen_size);
+}
+
+static normalized_coordinates normalize_coordinates(LONG x, LONG y) {
+    uint16_t screen_width  = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    uint16_t screen_height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+    largest_negative_coordinates lnc = get_largest_negative_coordinates();
+
+    x += abs(lnc.left);
+    y += abs(lnc.top);
+
+    normalized_coordinates nc = {
+            .x = get_absolute_coordinate(x, screen_width),
+            .y = get_absolute_coordinate(y, screen_height)
+    };
+
+    return nc;
 }
 
 static int map_keyboard_event(uiohook_event * const event, INPUT * const input) {
     input->type = INPUT_KEYBOARD; // | KEYEVENTF_SCANCODE
-    //input->ki.wScan = event->data.keyboard.rawcode;
     //input->ki.time = GetSystemTime();
 
     switch (event->type) {
@@ -87,43 +100,57 @@ static int map_keyboard_event(uiohook_event * const event, INPUT * const input) 
 
         default:
             logger(LOG_LEVEL_DEBUG, "%s [%u]: Invalid event for keyboard event mapping: %#X.\n",
-                __FUNCTION__, __LINE__, event->type);
+                    __FUNCTION__, __LINE__, event->type);
             return UIOHOOK_FAILURE;
     }
 
-    input->ki.wVk = (WORD) scancode_to_keycode(event->data.keyboard.keycode);
+    input->ki.wVk = (WORD) vcode_to_keycode(event->data.keyboard.keycode);
     if (input->ki.wVk == 0x0000) {
         logger(LOG_LEVEL_WARN, "%s [%u]: Unable to lookup scancode: %li\n",
                 __FUNCTION__, __LINE__, event->data.keyboard.keycode);
         return UIOHOOK_FAILURE;
     }
 
-    // FIXME Why is this checking MASK_SHIFT
-    if (event->mask & MASK_SHIFT) {
-        for (int i = 0; i < sizeof(extend_key_table) / sizeof(uint16_t)
-                && input->ki.wVk == extend_key_table[i]; i++) {
-            input->ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
-        }
+    input->ki.wScan = MapVirtualKeyW(input->ki.wVk, MAPVK_VK_TO_VSC_EX);
+
+    if (event->mask & MASK_ALT) {
+        input->ki.dwFlags |= KF_ALTDOWN;
+    }
+
+    if (HIBYTE(input->ki.wScan)) {
+        input->ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
     }
 
     return UIOHOOK_SUCCESS;
 }
 
 static int map_mouse_event(uiohook_event * const event, INPUT * const input) {
-    // FIXME implement multiple monitor support
-    uint16_t screen_width  = GetSystemMetrics(SM_CXSCREEN);
-    uint16_t screen_height = GetSystemMetrics(SM_CYSCREEN);
-
     input->type = INPUT_MOUSE;
     input->mi.mouseData = 0;
     input->mi.dwExtraInfo = 0;
     input->mi.time = 0; // GetSystemTime();
 
-    input->mi.dx = convert_to_relative_position(event->data.mouse.x, screen_width);
-    input->mi.dy = convert_to_relative_position(event->data.mouse.y, screen_height);
+    if (event->type != EVENT_MOUSE_WHEEL) {
+        LONG x = event->data.mouse.x;
+        LONG y = event->data.mouse.y;
+
+        if (event->type == EVENT_MOUSE_MOVED_RELATIVE_TO_CURSOR) {
+            POINT p;
+            if (GetCursorPos(&p)) {
+                x += p.x;
+                y += p.y;
+            }
+        }
+
+        normalized_coordinates nc = normalize_coordinates(x, y);
+
+        input->mi.dy = nc.y;
+        input->mi.dx = nc.x;
+    }
 
     switch (event->type) {
         case EVENT_MOUSE_PRESSED:
+        case EVENT_MOUSE_PRESSED_IGNORE_COORDS:
             if (event->data.mouse.button == MOUSE_NOBUTTON) {
                 logger(LOG_LEVEL_WARN, "%s [%u]: No button specified for mouse pressed event!\n",
                         __FUNCTION__, __LINE__);
@@ -145,14 +172,18 @@ static int map_mouse_event(uiohook_event * const event, INPUT * const input) {
                 }
             }
 
-            // We need to move the mouse to the correct location prior to clicking.
-            event->type = EVENT_MOUSE_MOVED;
-            // TODO Remember to check the status here.
-            hook_post_event(event);
-            event->type = EVENT_MOUSE_PRESSED;
+            if (event->type == EVENT_MOUSE_PRESSED) {
+                // We need to move the mouse to the correct location prior to clicking.
+                event->type = EVENT_MOUSE_MOVED;
+                // TODO Remember to check the status here.
+                hook_post_event(event);
+                event->type = EVENT_MOUSE_PRESSED;
+            }
+
             break;
 
         case EVENT_MOUSE_RELEASED:
+        case EVENT_MOUSE_RELEASED_IGNORE_COORDS:
             if (event->data.mouse.button == MOUSE_NOBUTTON) {
                 logger(LOG_LEVEL_WARN, "%s [%u]: No button specified for mouse released event!\n",
                         __FUNCTION__, __LINE__);
@@ -174,45 +205,50 @@ static int map_mouse_event(uiohook_event * const event, INPUT * const input) {
                 }
             }
 
-            // We need to move the mouse to the correct location prior to clicking.
-            event->type = EVENT_MOUSE_MOVED;
-            // TODO Remember to check the status here.
-            hook_post_event(event);
-            event->type = EVENT_MOUSE_PRESSED;
+            if (event->type == EVENT_MOUSE_RELEASED) {
+                // We need to move the mouse to the correct location prior to clicking.
+                event->type = EVENT_MOUSE_MOVED;
+                // TODO Remember to check the status here.
+                hook_post_event(event);
+                event->type = EVENT_MOUSE_RELEASED;
+            }
+
             break;
 
         case EVENT_MOUSE_WHEEL:
-            input->mi.dwFlags = MOUSEEVENTF_WHEEL;
-
-            // type, amount and rotation?
-            input->mi.mouseData = event->data.wheel.amount * event->data.wheel.rotation * WHEEL_DELTA;
+            if (event->data.wheel.direction == WHEEL_HORIZONTAL_DIRECTION) {
+                input->mi.dwFlags = (DWORD)MOUSEEVENTF_HWHEEL;
+                input->mi.mouseData = (DWORD)(event->data.wheel.rotation * -1);
+            } else {
+                input->mi.dwFlags = (DWORD)MOUSEEVENTF_WHEEL;
+                input->mi.mouseData = (DWORD)event->data.wheel.rotation;
+            }
             break;
 
         case EVENT_MOUSE_DRAGGED:
         case EVENT_MOUSE_MOVED:
-            input->mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
+        case EVENT_MOUSE_MOVED_RELATIVE_TO_CURSOR:
+            input->mi.dwFlags = MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
             break;
 
         default:
             logger(LOG_LEVEL_DEBUG, "%s [%u]: Invalid event for mouse event mapping: %#X.\n",
-                __FUNCTION__, __LINE__, event->type);
+                    __FUNCTION__, __LINE__, event->type);
             return UIOHOOK_FAILURE;
     }
 
     return UIOHOOK_SUCCESS;
 }
 
-// TODO This should return a status code, UIOHOOK_SUCCESS or otherwise.
-UIOHOOK_API void hook_post_event(uiohook_event * const event) {
-    int status = UIOHOOK_FAILURE;
-
-    INPUT *input = (INPUT *) calloc(1, sizeof(INPUT))   ;
+UIOHOOK_API int hook_post_event(uiohook_event * const event) {
+    INPUT *input = (INPUT *) calloc(1, sizeof(INPUT));
     if (input == NULL) {
         logger(LOG_LEVEL_ERROR, "%s [%u]: failed to allocate memory: calloc!\n",
                 __FUNCTION__, __LINE__);
-        return; // UIOHOOK_ERROR_OUT_OF_MEMORY
+        return UIOHOOK_ERROR_OUT_OF_MEMORY;
     }
 
+    int status = UIOHOOK_FAILURE;
     switch (event->type) {
         case EVENT_KEY_PRESSED:
         case EVENT_KEY_RELEASED:
@@ -223,7 +259,10 @@ UIOHOOK_API void hook_post_event(uiohook_event * const event) {
         case EVENT_MOUSE_RELEASED:
         case EVENT_MOUSE_WHEEL:
         case EVENT_MOUSE_MOVED:
+        case EVENT_MOUSE_MOVED_RELATIVE_TO_CURSOR:
         case EVENT_MOUSE_DRAGGED:
+        case EVENT_MOUSE_PRESSED_IGNORE_COORDS:
+        case EVENT_MOUSE_RELEASED_IGNORE_COORDS:
             status = map_mouse_event(event, input);
             break;
 
@@ -235,14 +274,63 @@ UIOHOOK_API void hook_post_event(uiohook_event * const event) {
 
         default:
             logger(LOG_LEVEL_DEBUG, "%s [%u]: Ignoring post event: %#X.\n",
-                __FUNCTION__, __LINE__, event->type);
-
+                    __FUNCTION__, __LINE__, event->type);
+            status = UIOHOOK_FAILURE;
     }
 
-    if (status != UIOHOOK_FAILURE && !SendInput(1, input, sizeof(INPUT))) {
+    if (status == UIOHOOK_SUCCESS && !SendInput(1, input, sizeof(INPUT))) {
         logger(LOG_LEVEL_ERROR, "%s [%u]: SendInput() failed! (%#lX)\n",
                 __FUNCTION__, __LINE__, (unsigned long) GetLastError());
+        status = UIOHOOK_FAILURE;
     }
 
     free(input);
+
+    return status;
+}
+
+UIOHOOK_API int hook_post_text(const uint16_t * const text) {
+    if (text == NULL) {
+        return UIOHOOK_ERROR_POST_TEXT_NULL;
+    }
+
+    int status = UIOHOOK_SUCCESS;
+
+    size_t count = 0;
+
+    for (int i = 0; text[i] != 0; i++) {
+        count++;
+    }
+
+    INPUT *input = (INPUT*)calloc(count * 2, sizeof(INPUT));
+
+    if (input == NULL) {
+        logger(LOG_LEVEL_ERROR, "%s [%u]: failed to allocate memory: calloc!\n",
+            __FUNCTION__, __LINE__);
+        return UIOHOOK_ERROR_OUT_OF_MEMORY;
+    }
+
+    for (int i = 0; i < count; i++) {
+        input[i].type = INPUT_KEYBOARD;
+        input[i].ki.wVk = 0;
+        input[i].ki.wScan = (WORD)text[i];
+        input[i].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYDOWN;
+    }
+
+    for (int i = 0; i < count; i++) {
+        input[count + i].type = INPUT_KEYBOARD;
+        input[count + i].ki.wVk = 0;
+        input[count + i].ki.wScan = (WORD)text[i];
+        input[count + i].ki.dwFlags = KEYEVENTF_UNICODE | KEYEVENTF_KEYUP;
+    }
+
+    if (!SendInput((UINT)count * 2, input, sizeof(INPUT))) {
+        logger(LOG_LEVEL_ERROR, "%s [%u]: SendInput() failed! (%#lX)\n",
+            __FUNCTION__, __LINE__, (unsigned long)GetLastError());
+        status = UIOHOOK_FAILURE;
+    }
+
+    free(input);
+
+    return UIOHOOK_SUCCESS;
 }
