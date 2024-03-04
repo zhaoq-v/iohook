@@ -29,6 +29,9 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
           node-version: 18
 
+      # NB: this fixes an issue with node-gyp 9. node-gyp
+      # 10 would remove the need for this, BUT it breaks
+      # the windows build in a mysterious way.
       - name: Setup macos Dependencies
         if: startsWith(matrix.os, 'macos')
         run: |
