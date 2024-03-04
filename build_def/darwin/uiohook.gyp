@@ -6,6 +6,8 @@
 			"libuiohook/include/uiohook.h",
 			"libuiohook/src/logger.c",
 			"libuiohook/src/logger.h",
+			"libuiohook/src/darwin/dispatch_event.h",
+			"libuiohook/src/darwin/dispatch_event.c",
 			"libuiohook/src/darwin/input_helper.h",
 			"libuiohook/src/darwin/input_helper.c",
 			"libuiohook/src/darwin/input_hook.c",

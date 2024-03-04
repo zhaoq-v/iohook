@@ -6,6 +6,8 @@
 			"libuiohook/include/uiohook.h",
 			"libuiohook/src/logger.c",
 			"libuiohook/src/logger.h",
+			"libuiohook/src/x11/dispatch_event.h",
+			"libuiohook/src/x11/dispatch_event.c",
 			"libuiohook/src/x11/input_helper.h",
 			"libuiohook/src/x11/input_helper.c",
 			"libuiohook/src/x11/input_hook.c",
