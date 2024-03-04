@@ -33,6 +33,7 @@ function initBuild() {
     targets = [[argv['runtime'], argv['version'], argv['abi']]];
   } else if ('all' in argv) {
     // If "--all", use those defined in package.json
+    // https://www.electronjs.org/docs/latest/tutorial/electron-timelines
     targets = require('./package.json').supportedTargets;
   } else {
     const options = optionsFromPackage();
@@ -164,6 +165,7 @@ function build(runtime, version, abi) {
     console.log('Building iohook for ' + runtime + ' v' + version + '>>>>');
     if (process.platform === 'win32') {
       if (version.split('.')[0] >= 4) {
+        // https://blog.knatten.org/2022/08/26/microsoft-c-versions-explained/
         process.env.msvs_toolset = 15;
         process.env.msvs_version = argv.msvs_version || 2017;
       } else {
