@@ -79,7 +79,7 @@
     "jest": "^26.6.3",
     "lint-staged": "^11.0.0",
     "minimist": "^1.2.5",
-    "nan": "github:jkleinsc/nan#remove_accessor_signature",
+    "nan": "^2.18.0",
     "node-abi": "^3.56.0",
     "node-gyp": "^10.0.1",
     "prebuild": "^10.0.1",
