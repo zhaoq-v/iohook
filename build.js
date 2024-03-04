@@ -178,6 +178,7 @@ function build(runtime, version, abi) {
       process.env.gyp_iohook_arch = arch;
     }
 
+    console.log('MORGAN', gypJsPath, args)
     let proc = spawn(gypJsPath, args, {
       env: process.env,
     });
