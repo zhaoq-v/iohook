@@ -78,6 +78,8 @@ function install(runtime, abi, platform, arch, cb) {
         console.error('# npm run build');
         console.error('');
       }
+
+      return;
     }
 
     let options = {
