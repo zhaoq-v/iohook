@@ -1,5 +1,5 @@
 # libUIOHook: Cross-platform keyboard and mouse hooking from userland.
-# Copyright (C) 2006-2022 Alexander Barker.  All Rights Reserved.
+# Copyright (C) 2006-2023 Alexander Barker.  All Rights Reserved.
 # https://github.com/kwhat/libuiohook/
 #
 # libUIOHook is free software: you can redistribute it and/or modify
@@ -271,9 +271,7 @@ elseif(APPLE)
         endif()
     endif()
 elseif(WIN32)
-    find_library(ADVAPI32 Advapi32)
-    target_include_directories(uiohook PRIVATE "${ADVAPI32}")
-    target_link_libraries(uiohook "${ADVAPI32}")
+    target_link_libraries(uiohook Advapi32)
 endif()
 
 

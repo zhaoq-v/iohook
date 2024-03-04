@@ -1,5 +1,5 @@
 /* libUIOHook: Cross-platform keyboard and mouse hooking from userland.
- * Copyright (C) 2006-2022 Alexander Barker.  All Rights Reserved.
+ * Copyright (C) 2006-2023 Alexander Barker.  All Rights Reserved.
  * https://github.com/kwhat/libuiohook/
  *
  * libUIOHook is free software: you can redistribute it and/or modify
@@ -190,7 +190,7 @@ static int map_mouse_event(uiohook_event * const event, INPUT * const input) {
 
         case EVENT_MOUSE_DRAGGED:
         case EVENT_MOUSE_MOVED:
-            input->mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE | MOUSEEVENTF_VIRTUALDESK;
+            input->mi.dwFlags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_MOVE;
             break;
 
         default:
