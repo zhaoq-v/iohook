@@ -81,7 +81,7 @@
     "minimist": "^1.2.5",
     "nan": "github:ajgassner/nan#electron-29-workaround",
     "node-abi": "^3.56.0",
-    "node-gyp": "^9.0.0",
+    "node-gyp": "^9.4.1",
     "prebuild": "^10.0.1",
     "prettier": "^2.3.1",
     "robotjs": "^0.6.0",
