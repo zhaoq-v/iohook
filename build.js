@@ -143,7 +143,14 @@ function build(runtime, version, abi) {
 
     if (/^electron/i.test(runtime)) {
       args.push('--dist-url=https://electronjs.org/headers');
-      // TODO: for electron 26 on macOS arm64?
+    }
+
+    // Fix build electron 26 on macOS arm64?
+    if (
+      /^electron/i.test(runtime) &&
+      version === '26.0.0' &&
+      arch === 'arm64'
+    ) {
       args.push('--v8_enable_pointer_compression=1');
     }
 
