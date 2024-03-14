@@ -141,13 +141,14 @@ function build(runtime, version, abi) {
       '--arch=' + arch,
     ];
 
-    if (/^electron/i.test(runtime)) {
+    const isElectron = /^electron/i.test(runtime);
+    if (isElectron) {
       args.push('--dist-url=https://electronjs.org/headers');
     }
 
     if (parseInt(abi) >= 80) {
       // Fix build electron 26 on macOS arm64?
-      if (arch === 'x64' || (arch === 'arm64' && version === '26.0.0')) {
+      if (arch === 'x64' || (arch === 'arm64' && isElectron)) {
         args.push('--v8_enable_pointer_compression=1');
       } else {
         args.push('--v8_enable_pointer_compression=0');
