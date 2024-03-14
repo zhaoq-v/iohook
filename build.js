@@ -152,9 +152,7 @@ function build(runtime, version, abi) {
       arch === 'arm64'
     ) {
       args.push('--v8_enable_pointer_compression=1');
-    }
-
-    if (parseInt(abi) >= 80) {
+    } else if (parseInt(abi) >= 80) {
       if (arch === 'x64') {
         args.push('--v8_enable_pointer_compression=1');
       } else {
