@@ -143,6 +143,8 @@ function build(runtime, version, abi) {
 
     if (/^electron/i.test(runtime)) {
       args.push('--dist-url=https://electronjs.org/headers');
+      // TODO: for electron 26 on macOS arm64?
+      args.push('--v8_enable_pointer_compression=1');
     }
 
     if (parseInt(abi) >= 80) {
