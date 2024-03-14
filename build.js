@@ -147,13 +147,7 @@ function build(runtime, version, abi) {
 
     if (parseInt(abi) >= 80) {
       // Fix build electron 26 on macOS arm64?
-      if (
-        /^electron/i.test(runtime) &&
-        version === '26.0.0' &&
-        arch === 'arm64'
-      ) {
-        args.push('--v8_enable_pointer_compression=1');
-      } else if (arch === 'x64') {
+      if (arch === 'x64' || (arch === 'arm64' && version === '26.0.0')) {
         args.push('--v8_enable_pointer_compression=1');
       } else {
         args.push('--v8_enable_pointer_compression=0');
