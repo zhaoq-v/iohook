@@ -79,7 +79,7 @@
     "jest": "^26.6.3",
     "lint-staged": "^11.0.0",
     "minimist": "^1.2.5",
-    "nan": "github:ajgassner/nan#electron-29-workaround",
+    "nan": "^2.22.2",
     "node-abi": "^3.56.0",
     "node-gyp": "^9.4.1",
     "prebuild": "^10.0.1",
